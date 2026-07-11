@@ -2,9 +2,20 @@ import streamlit as st
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 import os
+import logging
 from dotenv import load_dotenv
 
 load_dotenv()
+
+LOG_DIR = "logs"
+os.makedirs(LOG_DIR, exist_ok=True)
+
+logging.basicConfig(
+    filename=os.path.join(LOG_DIR, "app.log"),
+    level=logging.INFO,
+    format="%(asctime)s — [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
 
 CLIENT_ID = os.getenv("SPOTIPY_CLIENT_ID")
 CLIENT_SECRET = os.getenv("SPOTIPY_CLIENT_SECRET")
@@ -39,10 +50,17 @@ def get_spotify_client():
         code = params.get("code")
 
         if code:
-            token_info = sp_oauth.get_access_token(code, as_dict=True)
+            try:
+                token_info = sp_oauth.get_access_token(code, as_dict=True)
+                logging.info("Spotify authentication successful")
+            except Exception as e:
+                logging.error(f"Spotify authentication failed: {e}")
+                st.error("Login failed. Please try again.")
+                st.stop()
             st.query_params.clear()
         else:
             auth_url = sp_oauth.get_authorize_url()
+            logging.info("Redirected user to Spotify login")
             st.markdown(f"[Log in with Spotify]({auth_url})")
             st.stop()
 
@@ -54,20 +72,30 @@ def search_playlist(sp, mood, subject, attempt=0):
     Falls back to a chill playlist after MAX_REJECTIONS attempts."""
     if attempt >= MAX_REJECTIONS:
         query = FALLBACK_QUERY
+        logging.warning(f"Rejection limit reached ({attempt}) — falling back to '{FALLBACK_QUERY}'")
     else:
         query = f"{mood} {subject} study playlist"
 
-    results = sp.search(q=query, type="playlist", limit=1)
+    try:
+        results = sp.search(q=query, type="playlist", limit=1)
+    except Exception as e:
+        logging.error(f"Spotify search failed for query '{query}': {e}")
+        return None
+
     items = results.get("playlists", {}).get("items", [])
+    items = [item for item in items if item]
 
     if not items:
+        logging.warning(f"No playlist found for query '{query}'")
         return None
 
     playlist = items[0]
+    track_count = playlist.get("tracks", {}).get("total", 0)
+    logging.info(f"Playlist found for query '{query}': \"{playlist['name']}\" ({track_count} tracks)")
     return {
         "name": playlist["name"],
         "url": playlist["external_urls"]["spotify"],
-        "track_count": playlist["tracks"]["total"]
+        "track_count": track_count
     }
 
 
